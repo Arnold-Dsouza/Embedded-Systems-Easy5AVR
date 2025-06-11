@@ -13,7 +13,6 @@ build/default/production/main.o.d build/default/production/main.o: main.c \
  c:\program\ files\microchip\avr8-gnu-toolchain-win32_x86_64\avr\include\util\delay.h \
  c:\program\ files\microchip\avr8-gnu-toolchain-win32_x86_64\avr\include\util\delay_basic.h \
  c:\program\ files\microchip\avr8-gnu-toolchain-win32_x86_64\avr\include\math.h \
- c:\program\ files\microchip\avr8-gnu-toolchain-win32_x86_64\avr\include\avr\interrupt.h \
  vma419.h
 
 c:\program\ files\microchip\avr8-gnu-toolchain-win32_x86_64\avr\include\avr\io.h:
@@ -43,7 +42,5 @@ c:\program\ files\microchip\avr8-gnu-toolchain-win32_x86_64\avr\include\util\del
 c:\program\ files\microchip\avr8-gnu-toolchain-win32_x86_64\avr\include\util\delay_basic.h:
 
 c:\program\ files\microchip\avr8-gnu-toolchain-win32_x86_64\avr\include\math.h:
-
-c:\program\ files\microchip\avr8-gnu-toolchain-win32_x86_64\avr\include\avr\interrupt.h:
 
 vma419.h:

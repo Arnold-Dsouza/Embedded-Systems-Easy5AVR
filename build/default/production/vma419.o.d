@@ -16,8 +16,7 @@ build/default/production/vma419.o.d build/default/production/vma419.o: \
  c:\program\ files\microchip\avr8-gnu-toolchain-win32_x86_64\avr\include\math.h \
  c:\program\ files\microchip\avr8-gnu-toolchain-win32_x86_64\avr\include\stdlib.h \
  c:\program\ files\microchip\avr8-gnu-toolchain-win32_x86_64\lib\gcc\avr\7.3.0\include\stddef.h \
- c:\program\ files\microchip\avr8-gnu-toolchain-win32_x86_64\avr\include\string.h \
- c:\program\ files\microchip\avr8-gnu-toolchain-win32_x86_64\avr\include\avr\interrupt.h
+ c:\program\ files\microchip\avr8-gnu-toolchain-win32_x86_64\avr\include\string.h
 
 vma419.h:
 
@@ -54,5 +53,3 @@ c:\program\ files\microchip\avr8-gnu-toolchain-win32_x86_64\avr\include\stdlib.h
 c:\program\ files\microchip\avr8-gnu-toolchain-win32_x86_64\lib\gcc\avr\7.3.0\include\stddef.h:
 
 c:\program\ files\microchip\avr8-gnu-toolchain-win32_x86_64\avr\include\string.h:
-
-c:\program\ files\microchip\avr8-gnu-toolchain-win32_x86_64\avr\include\avr\interrupt.h:
