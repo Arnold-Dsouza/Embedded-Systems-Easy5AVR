@@ -22,10 +22,17 @@
 
 #include <avr/io.h>
 #include <util/delay.h>
+#include <string.h>
 #include "vma419.h"
+#include "VMA419_Font.h"
 
 // --- Global Display Structures ---
 VMA419_Display dmd_display;
+
+// --- Scrolling Text Variables ---
+char scroll_text[] = "HELLO WORLD ";  // Text to scroll (add space at end)
+int16_t scroll_position = 32;  // Start position (off-screen right)
+uint8_t scroll_speed = 50;    // Delay in milliseconds between scroll steps
 
 // Pin configuration for VMA419 display
 // Adjust these pin assignments according to your hardware setup
@@ -50,23 +57,41 @@ int main(void) {
     // Parameters: display structure, pin config, panels_wide=1, panels_high=1
     if (vma419_init(&dmd_display, &dmd_pins, 1, 1) != 0) {
         // Initialization failed - halt execution
-        while(1); 
-    }
-      // Clear the display buffer to ensure all LEDs start OFF
+        while(1);    }    // Clear the display buffer to ensure all LEDs start OFF
     vma419_clear(&dmd_display);
+      // Initialize font system
+    vma419_font_init(&dmd_display);
     
-    // Test Pattern: Light up a single LED at bottom-right corner (31,15)
-    // This demonstrates successful pixel addressing and display functionality
-    // Position (31,15) = rightmost column, bottom row of the 32x16 display
-    vma419_set_pixel(&dmd_display, 31, 15, 1); // Set pixel at (31,15) - bottom-right corner
-    
-    // Main display refresh loop
+    // Main display refresh loop with scrolling text
     // The VMA419 uses 4-phase multiplexing, so we cycle through all 4 phases
+    uint16_t refresh_counter = 0;
+    
     while(1) {
+        // Clear display buffer
+        vma419_clear(&dmd_display);
+        
+        // Draw scrolling text
+        vma419_font_draw_string(&dmd_display, scroll_position, 4, scroll_text);
+        
+        // Refresh display (4-phase multiplexing)
         for(uint8_t cycle = 0; cycle < 4; cycle++) {
             dmd_display.scan_cycle = cycle;
             vma419_scan_display_quarter(&dmd_display);
             _delay_ms(1); // 1ms delay per phase = 250Hz refresh rate
+        }
+        
+        // Update scroll position every few refresh cycles
+        refresh_counter++;
+        if(refresh_counter >= scroll_speed) {
+            refresh_counter = 0;
+            scroll_position--;
+            
+            // Reset position when text has scrolled completely off screen
+            // Calculate text width: each character is 6 pixels wide (5 + 1 spacing)
+            int16_t text_width = strlen(scroll_text) * 6;
+            if(scroll_position < -text_width) {
+                scroll_position = 32; // Start from right edge again
+            }
         }
     }
     
