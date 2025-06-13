@@ -35,11 +35,11 @@ int16_t scroll_position = 32;  // Start position (off-screen right)
 uint8_t scroll_speed = 50;    // Delay in milliseconds between scroll steps
 
 // Pin configuration for VMA419 display
-// Adjust these pin assignments according to your hardware setup
+// Hardware SPI configuration for ATmega16
 VMA419_PinConfig dmd_pins = {
-    // SPI Data and Clock pins (for bit-banging SPI)
-    .spi_clk_port_ddr  = &DDRB, .spi_clk_port_out  = &PORTB, .spi_clk_pin_mask  = (1 << PB7), // CLK -> PB7
-    .spi_data_port_ddr = &DDRB, .spi_data_port_out = &PORTB, .spi_data_pin_mask = (1 << PB5), // R -> PB5
+    // Hardware SPI pins (ATmega16 SPI peripheral)
+    .spi_clk_port_ddr  = &DDRB, .spi_clk_port_out  = &PORTB, .spi_clk_pin_mask  = (1 << PB7), // SCK -> PB7 (Hardware SPI Clock)
+    .spi_data_port_ddr = &DDRB, .spi_data_port_out = &PORTB, .spi_data_pin_mask = (1 << PB5), // MOSI -> PB5 (Hardware SPI Data)
 
     // Row Select Pins (2-bit binary selection for 4 row phases)
     .a_port_ddr        = &DDRA, .a_port_out        = &PORTA, .a_pin_mask        = (1 << PA1), // A -> PA1
