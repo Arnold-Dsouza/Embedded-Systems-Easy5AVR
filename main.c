@@ -4,7 +4,7 @@
  * This program demonstrates the VMA419 32x16 LED matrix display driver.
  * It initializes a single VMA419 panel and displays a test LED at position (31,15).
  * 
- * Test Pattern: Single LED at bottom-right corner (31,15)
+ * Test Pattern: Single LED at bottom-right Corner (31,15)
  * - Demonstrates successful hardware initialization
  * - Validates pixel addressing and row remapping
  * - Confirms 4-phase multiplexing operation
@@ -20,15 +20,17 @@
  * Status: FULLY FUNCTIONAL ✓
  */
 
+// UART Configuration for Internal 8MHz Oscillator
+#define F_CPU 8000000UL   // 8MHz internal oscillator
+
 #include <avr/io.h>
 #include <util/delay.h>
 #include <string.h>
+#include <stdio.h>  // For sprintf function
 #include <avr/interrupt.h>
 #include "vma419.h"
 #include "VMA419_Font.h"
-
-// UART Configuration for Internal 8MHz Oscillator
-#define F_CPU 8000000UL   // 8MHz internal oscillator
+#include "fesb_logo.h"
 #define BAUD 9600         // Baud rate
 #define MYUBRR ((F_CPU / (16UL * BAUD)) - 1) // Calculate UART baud rate = 51
 
@@ -41,31 +43,19 @@
 VMA419_Display dmd_display;
 
 // --- Scrolling Text Variables ---
-char scroll_text[64] = "HELLO WORLD ";  // Text to scroll (increased buffer size)
+char scroll_text[32] = "WELCOME ERASMUS STUDENTS";  // Reduced from 64 to save RAM
 int16_t scroll_position = 32;  // Start position (off-screen right)
 uint8_t scroll_speed = 30;    // Delay in milliseconds between scroll steps
-
-// --- Button Control Variables ---
-uint8_t scroll_direction = 0;  // 0 = right to left, 1 = left to right
-int16_t text_y_position = 4;   // Vertical position of text (default middle)
-uint8_t brightness_level = 3;  // Brightness level (0-7, higher = brighter)
-uint8_t button_debounce = 0;   // Simple debounce counter
-
-// Speed and position limits
-#define SPEED_MIN 10
-#define SPEED_MAX 100
-#define Y_POS_MIN 0
-#define Y_POS_MAX 9  // Keep text within display bounds (16 pixels - 7 font height)
-#define BRIGHTNESS_MIN 0
-#define BRIGHTNESS_MAX 7
+int8_t scroll_direction = -1; // Direction: -1 = right to left (default), 1 = left to right
+int8_t text_y_offset = 4;     // Vertical position (0-15 for 16-pixel height display)
 
 // --- UART Circular Buffer Variables ---
-#define UART_BUFFER_SIZE 128
+#define UART_BUFFER_SIZE 64  // Reduced from 128 to save RAM
 volatile char uart_rx_buffer[UART_BUFFER_SIZE];
 volatile uint8_t uart_rx_head = 0;
 volatile uint8_t uart_rx_tail = 0;
 volatile uint8_t uart_message_ready = 0;
-char uart_message[64];  // Final message buffer
+char uart_message[32];  // Reduced from 64 to save RAM
 
 // UART Communication Functions
 void USART_Init(unsigned int ubrr) {
@@ -173,86 +163,6 @@ void uart_get_message(char* buffer, uint8_t max_length) {
     }
 }
 
-// Button Control Functions
-void init_buttons(void) {
-    // Configure PC0-PC7 as inputs with pull-up resistors
-    DDRC = 0x00;   // All PORTC pins as inputs
-    PORTC = 0xFF;  // Enable pull-up resistors on all pins
-}
-
-void check_buttons(void) {
-    // Simple debouncing: only check buttons every few cycles
-    button_debounce++;
-    if (button_debounce < 10) return;
-    button_debounce = 0;
-    
-    uint8_t button_state = ~PINC;  // Invert because buttons pull to ground
-    
-    // PC0 - Increase Speed
-    if (button_state & (1 << PC0)) {
-        if (scroll_speed > SPEED_MIN) {
-            scroll_speed -= 5;  // Decrease delay = increase speed
-            USART_SendString("Speed increased\r\n> ");
-        }
-    }
-    
-    // PC1 - Decrease Speed
-    if (button_state & (1 << PC1)) {
-        if (scroll_speed < SPEED_MAX) {
-            scroll_speed += 5;  // Increase delay = decrease speed
-            USART_SendString("Speed decreased\r\n> ");
-        }
-    }
-    
-    // PC2 - Direction: Left to Right
-    if (button_state & (1 << PC2)) {
-        scroll_direction = 1;
-        // Reset position for new direction
-        scroll_position = -((int16_t)strlen(scroll_text) * 6);
-        USART_SendString("Direction: Left to Right\r\n> ");
-    }
-    
-    // PC3 - Direction: Right to Left
-    if (button_state & (1 << PC3)) {
-        scroll_direction = 0;
-        // Reset position for new direction
-        scroll_position = 32;
-        USART_SendString("Direction: Right to Left\r\n> ");
-    }
-    
-    // PC4 - Move text upwards
-    if (button_state & (1 << PC4)) {
-        if (text_y_position > Y_POS_MIN) {
-            text_y_position--;
-            USART_SendString("Text moved up\r\n> ");
-        }
-    }
-    
-    // PC5 - Move text downwards
-    if (button_state & (1 << PC5)) {
-        if (text_y_position < Y_POS_MAX) {
-            text_y_position++;
-            USART_SendString("Text moved down\r\n> ");
-        }
-    }
-    
-    // PC6 - Brightness Down
-    if (button_state & (1 << PC6)) {
-        if (brightness_level > BRIGHTNESS_MIN) {
-            brightness_level--;
-            USART_SendString("Brightness decreased\r\n> ");
-        }
-    }
-    
-    // PC7 - Brightness Up
-    if (button_state & (1 << PC7)) {
-        if (brightness_level < BRIGHTNESS_MAX) {
-            brightness_level++;
-            USART_SendString("Brightness increased\r\n> ");
-        }
-    }
-}
-
 void updateDisplayMessage(const char* message) {
     // Clear the scroll text and copy new message
     memset(scroll_text, 0, sizeof(scroll_text));
@@ -272,18 +182,11 @@ void updateDisplayMessage(const char* message) {
     scroll_text[msg_len] = ' ';
     scroll_text[msg_len + 1] = '\0';
     
-    // Reset scroll position based on direction
-    if (scroll_direction == 0) {
-        // Right to left: start from right edge
-        scroll_position = 32;
-    } else {
-        // Left to right: start from left edge (negative position)
-        int16_t text_width = strlen(scroll_text) * 6;
-        scroll_position = -text_width;
-    }
+    // Reset scroll position to start from right
+    scroll_position = 32;
     
     // Send confirmation via UART
-    USART_SendString("Message updated: ");
+    USART_SendString("Updated: ");
     USART_SendString(scroll_text);
     USART_SendString("\r\n> ");
 }
@@ -311,7 +214,12 @@ int main(void) {
     _delay_ms(100);
     
     // Initialize UART communication
-    USART_Init(MYUBRR);
+    USART_Init(MYUBRR);    // Initialize PC0 and PC1 as inputs with pull-up resistors
+    // PC0: Speed Up button, PC1: Speed Down button
+    // PC2: Toggle Direction button
+    // PC6: Text Up button, PC7: Text Down button
+    DDRC &= ~((1 << PC0) | (1 << PC1) | (1 << PC2) | (1 << PC6) | (1 << PC7));  // Set as inputs
+    PORTC |= (1 << PC0) | (1 << PC1) | (1 << PC2) | (1 << PC6) | (1 << PC7);    // Enable pull-up resistors
     
     // Wait for UART to stabilize
     _delay_ms(100);
@@ -321,14 +229,27 @@ int main(void) {
     _delay_ms(10);
     USART_Transmit('\r');
     USART_Transmit('\n');
-      // Send welcome message
+    
+    // Send welcome message
     USART_SendString("VMA419 LED Display - UART Control Ready!\r\n");
     USART_SendString("Type your message and press Enter to display on LED matrix\r\n");
-    USART_SendString("\r\nButton Controls (PC0-PC7):\r\n");
-    USART_SendString("PC0: Speed Up    | PC1: Speed Down\r\n");
-    USART_SendString("PC2: Left->Right | PC3: Right->Left\r\n");
-    USART_SendString("PC4: Move Up     | PC5: Move Down\r\n");
-    USART_SendString("PC6: Dim         | PC7: Brighten\r\n");
+      // Display current speed and direction information
+    USART_SendString("Speed: ");
+    // Simple digit conversion without sprintf to save memory
+    if (scroll_speed >= 100) {
+        USART_Transmit('0' + (scroll_speed / 100));
+        USART_Transmit('0' + ((scroll_speed % 100) / 10));
+        USART_Transmit('0' + (scroll_speed % 10));
+    } else if (scroll_speed >= 10) {
+        USART_Transmit('0' + (scroll_speed / 10));
+        USART_Transmit('0' + (scroll_speed % 10));
+    } else {
+        USART_Transmit('0' + scroll_speed);
+    }
+    USART_SendString("\r\nDirection: ");
+    USART_SendString((scroll_direction < 0) ? "R>L" : "L>R");
+    USART_SendString("\r\n");
+    
     USART_SendString("> ");
     
     // Initialize the VMA419 display driver
@@ -338,72 +259,218 @@ int main(void) {
         USART_SendString("ERROR: Display initialization failed!\r\n");
         while(1);
     }
-    
-    // Clear the display buffer to ensure all LEDs start OFF
+      // Clear the display buffer to ensure all LEDs start OFF
     vma419_clear(&dmd_display);
-      // Initialize font system
+    
+    // Initialize font system
     vma419_font_init(&dmd_display);
     
-    // Initialize button system
-    init_buttons();
+    // ========================================================================
+    // DISPLAY FESB LOGO FOR 10 SECONDS
+    // ========================================================================
+    USART_SendString("Displaying FESB Logo for 10 seconds...\r\n");
+    fesb_logo_show_for_duration(&dmd_display, 10);    USART_SendString("FESB Logo display complete. Starting scrolling text...\r\n");
+    USART_SendString("> ");
     
-    // Variables for UART message processing
-    char new_message[64]; // Buffer for complete messages
+    // Clear display after logo and prepare for scrolling text
+    vma419_clear(&dmd_display);
+    
+    // Add stabilization delay after logo display
+    _delay_ms(200);    // Re-initialize button pins to ensure proper state after logo display
+    // (Logo display might have affected pin states)
+    DDRC &= ~((1 << PC0) | (1 << PC1) | (1 << PC2) | (1 << PC6) | (1 << PC7));  // Set as inputs
+    PORTC |= (1 << PC0) | (1 << PC1) | (1 << PC2) | (1 << PC6) | (1 << PC7);    // Enable pull-up resistors
+    
+    // Wait for button pins to stabilize
+    _delay_ms(50);
+      // Variables for UART message processing
+    char new_message[32]; // Reduced buffer size
     uint16_t refresh_counter = 0;
-      // Main display refresh loop with UART message handling
+    uint16_t button_status_counter = 0; // Counter for periodic button status report    // Initialize button states properly after FESB logo display
+    // Read current button states to initialize previous states
+    uint8_t button_pc0_prev = (PINC & (1 << PC0)) >> PC0; // Previous state of PC0 (Speed Up)
+    uint8_t button_pc1_prev = (PINC & (1 << PC1)) >> PC1; // Previous state of PC1 (Speed Down)
+    uint8_t button_pc2_prev = (PINC & (1 << PC2)) >> PC2; // Previous state of PC2 (Toggle Direction)
+    uint8_t button_pc6_prev = (PINC & (1 << PC6)) >> PC6; // Previous state of PC6 (Text Up)
+    uint8_t button_pc7_prev = (PINC & (1 << PC7)) >> PC7; // Previous state of PC7 (Text Down)
+    uint8_t button_debounce_timer = 0; // Timer for button debounce    // Debug: Send initial button states via UART (simplified)
+    USART_SendString("Buttons: ");
+    USART_Transmit('0' + button_pc0_prev);
+    USART_Transmit('0' + button_pc1_prev);
+    USART_Transmit('0' + button_pc2_prev);
+    USART_Transmit('0' + button_pc6_prev);
+    USART_Transmit('0' + button_pc7_prev);
+    USART_SendString("\r\n");
+    
+    // Send button status message
+    USART_SendString("Controls: PC0=Speed+, PC1=Speed-, PC2=ToggleDir, PC6=Up, PC7=Down\r\n");
+    USART_SendString("> ");
+    
+    // Main display refresh loop with UART message handling
     // The VMA419 uses 4-phase multiplexing, so we cycle through all 4 phases
     while(1) {
         // Check for new UART message
         if (uart_message_available()) {
             uart_get_message(new_message, sizeof(new_message));
             updateDisplayMessage(new_message); // Update LED display
-        }
-        
-        // Check button inputs
-        check_buttons();
-        
-        // Clear display buffer
+        }        // Process button inputs with proper debouncing
+        // Only check buttons when not in debounce period
+        if (button_debounce_timer == 0) {
+            // Read current button states (0 = pressed, 1 = released due to pull-up)
+            uint8_t button_pc0_current = (PINC & (1 << PC0)) >> PC0;
+            uint8_t button_pc1_current = (PINC & (1 << PC1)) >> PC1;
+            uint8_t button_pc2_current = (PINC & (1 << PC2)) >> PC2;
+            uint8_t button_pc6_current = (PINC & (1 << PC6)) >> PC6;
+            uint8_t button_pc7_current = (PINC & (1 << PC7)) >> PC7;
+
+            // Debug: Detect any button state changes (simplified)
+            if (button_pc0_current != button_pc0_prev || button_pc1_current != button_pc1_prev ||
+                button_pc2_current != button_pc2_prev ||
+                button_pc6_current != button_pc6_prev || button_pc7_current != button_pc7_prev) {
+                USART_SendString("Btn: ");
+                USART_Transmit('0' + button_pc0_current);
+                USART_Transmit('0' + button_pc1_current);
+                USART_Transmit('0' + button_pc2_current);
+                USART_Transmit('0' + button_pc6_current);
+                USART_Transmit('0' + button_pc7_current);
+                USART_SendString("\r\n");
+            }
+              // PC0: Speed Up button (decrease delay value)
+            if (button_pc0_prev == 1 && button_pc0_current == 0) {
+                // Button just pressed - increase speed (lower delay)
+                if (scroll_speed > 5) {
+                    scroll_speed -= 5;
+                    USART_SendString("Speed+: ");
+                    USART_Transmit('0' + (scroll_speed / 10));
+                    USART_Transmit('0' + (scroll_speed % 10));
+                    USART_SendString("\r\n> ");
+                } else {
+                    USART_SendString("Speed MAX\r\n> ");
+                }
+                button_debounce_timer = 50; // Set debounce timer (50 * 4ms = 200ms)
+            }
+            
+            // PC1: Speed Down button (increase delay value)
+            if (button_pc1_prev == 1 && button_pc1_current == 0) {
+                // Button just pressed - decrease speed (higher delay)
+                if (scroll_speed < 100) {
+                    scroll_speed += 5;
+                    USART_SendString("Speed-: ");
+                    USART_Transmit('0' + (scroll_speed / 10));
+                    USART_Transmit('0' + (scroll_speed % 10));
+                    USART_SendString("\r\n> ");
+                } else {
+                    USART_SendString("Speed MIN\r\n> ");
+                }
+                button_debounce_timer = 50; // Set debounce timer
+            }            // PC2: Toggle Direction button
+            if (button_pc2_prev == 1 && button_pc2_current == 0) {
+                // Button just pressed - toggle direction
+                scroll_direction = -scroll_direction; // Toggle between 1 and -1
+                
+                // Reset scroll position for new direction
+                if (scroll_direction < 0) {
+                    // Right to left
+                    scroll_position = 32;
+                    USART_SendString("Dir: R>L\r\n> ");
+                } else {
+                    // Left to right
+                    scroll_position = -strlen(scroll_text) * 6;
+                    USART_SendString("Dir: L>R\r\n> ");
+                }
+                button_debounce_timer = 50; // Set debounce timer
+            }
+            
+            // PC6: Text Up button (decrease Y offset)
+            if (button_pc6_prev == 1 && button_pc6_current == 0) {
+                // Button just pressed - move text up
+                if (text_y_offset > 0) {
+                    text_y_offset--;
+                    USART_SendString("Text Up: Y=");
+                    USART_Transmit('0' + (text_y_offset / 10));
+                    USART_Transmit('0' + (text_y_offset % 10));
+                    USART_SendString("\r\n> ");
+                } else {
+                    USART_SendString("Text at TOP\r\n> ");
+                }
+                button_debounce_timer = 50; // Set debounce timer
+            }
+            
+            // PC7: Text Down button (increase Y offset)
+            if (button_pc7_prev == 1 && button_pc7_current == 0) {
+                // Button just pressed - move text down
+                if (text_y_offset < 15) {
+                    text_y_offset++;
+                    USART_SendString("Text Down: Y=");
+                    USART_Transmit('0' + (text_y_offset / 10));
+                    USART_Transmit('0' + (text_y_offset % 10));
+                    USART_SendString("\r\n> ");
+                } else {
+                    USART_SendString("Text at BOTTOM\r\n> ");
+                }
+                button_debounce_timer = 50; // Set debounce timer
+            }            // Update previous button states
+            button_pc0_prev = button_pc0_current;
+            button_pc1_prev = button_pc1_current;
+            button_pc2_prev = button_pc2_current;
+            button_pc6_prev = button_pc6_current;
+            button_pc7_prev = button_pc7_current;} else {
+            // Decrement debounce timer
+            button_debounce_timer--;
+        }        // Periodic button status report (every 1000 refresh cycles ~ 4 seconds)
+        button_status_counter++;
+        if (button_status_counter >= 1000) {
+            button_status_counter = 0;
+            // Read current button states for status report
+            uint8_t pc0_state = (PINC & (1 << PC0)) >> PC0;
+            uint8_t pc1_state = (PINC & (1 << PC1)) >> PC1;
+            uint8_t pc2_state = (PINC & (1 << PC2)) >> PC2;
+            uint8_t pc6_state = (PINC & (1 << PC6)) >> PC6;
+            uint8_t pc7_state = (PINC & (1 << PC7)) >> PC7;
+            
+            USART_SendString("Status: ");
+            USART_Transmit('0' + pc0_state);
+            USART_Transmit('0' + pc1_state);
+            USART_Transmit('0' + pc2_state);
+            USART_Transmit('0' + pc6_state);
+            USART_Transmit('0' + pc7_state);
+            USART_SendString("\r\n> ");
+        }// Clear display buffer
         vma419_clear(&dmd_display);
         
-        // Draw scrolling text at the specified vertical position
-        vma419_font_draw_string(&dmd_display, scroll_position, text_y_position, scroll_text);
-          // Refresh display (4-phase multiplexing with brightness control)
+        // Draw scrolling text with variable Y offset
+        vma419_font_draw_string(&dmd_display, scroll_position, text_y_offset, scroll_text);
+        
+        // Refresh display (4-phase multiplexing)
         for(uint8_t cycle = 0; cycle < 4; cycle++) {
             dmd_display.scan_cycle = cycle;
             vma419_scan_display_quarter(&dmd_display);
-            
-            // Brightness control: vary the display ON time
-            // Higher brightness_level = longer ON time
-            uint8_t on_time = brightness_level + 1; // 1-8 range
-            for(uint8_t i = 0; i < on_time; i++) {
-                _delay_us(125); // Base delay unit (125μs × 8 = 1ms max)
-            }
-        }
-          // Update scroll position every few refresh cycles
+            _delay_ms(1); // 1ms delay per phase = 250Hz refresh rate
+        }          // Update scroll position every few refresh cycles
         refresh_counter++;
         if(refresh_counter >= scroll_speed) {
             refresh_counter = 0;
             
+            // Update position based on direction
+            scroll_position += scroll_direction;
+            
             // Calculate text width: each character is 6 pixels wide (5 + 1 spacing)
             int16_t text_width = strlen(scroll_text) * 6;
             
-            if (scroll_direction == 0) {
-                // Right to left scrolling
-                scroll_position--;
-                // Reset position when text has scrolled completely off screen
+            // Handle position wrapping based on direction
+            if (scroll_direction < 0) {
+                // Right to left (default) - reset when text has scrolled off left side
                 if(scroll_position < -text_width) {
                     scroll_position = 32; // Start from right edge again
                 }
             } else {
-                // Left to right scrolling
-                scroll_position++;
-                // Reset position when text has scrolled completely off screen
+                // Left to right - reset when text has scrolled off right side
                 if(scroll_position > 32) {
-                    scroll_position = -text_width; // Start from left edge again
+                    scroll_position = -text_width; // Start from left edge
                 }
             }
         }
     }
-    
-    return 0; // Should never be reached
+
+    return 0;
 }

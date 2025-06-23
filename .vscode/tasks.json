@@ -1,0 +1,24 @@
+{
+	"version": "2.0.0",
+	"tasks": [
+		{
+			"label": "Build MPLABX Project",
+			"type": "shell",
+			"command": "make",
+			"args": [
+				"-f",
+				"Makefile",
+				"clean",
+				"&&",
+				"make",
+				"-f",
+				"Makefile"
+			],
+			"group": "build",
+			"problemMatcher": [
+				"$gcc"
+			],
+			"isBackground": false
+		}
+	]
+}
