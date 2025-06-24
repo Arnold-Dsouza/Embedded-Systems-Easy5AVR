@@ -85,7 +85,7 @@ void USART_SendString(const char* str) {
 }
 
 char USART_Receive(void) {
-    while (!(UCSRA & (1 << RXC))); // Wait until character is received
+    while (!(UCSRA & (1 << RXC))); 
     return UDR; // Return the received character
 }
 
