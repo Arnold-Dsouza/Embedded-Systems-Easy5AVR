@@ -8,8 +8,6 @@
  * The logo has been stylized to fit the 32x16 resolution while
  * maintaining the recognizable FESB letter forms.
  * 
- * Author: Arnold Dsouza
- * Date: June 20, 2025
  */
 
 #ifndef FESB_LOGO_H

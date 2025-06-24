@@ -20,9 +20,6 @@
  * - 5 push buttons connected to pins PC0, PC1, PC2, PC6, PC7
  * - USB/serial connection to computer
  * 
- * Created by: Arnold Dsouza
- * Date: November 6, 2025
- * Status: Working perfectly! ✓
  */
 
 #define F_CPU 8000000UL   
@@ -294,7 +291,7 @@ int main(void) {
 
     // Make sure the button pins are still set up correctly (logo display might have changed them)
     DDRC &= ~((1 << PC0) | (1 << PC1) | (1 << PC2) | (1 << PC6) | (1 << PC7));  // Inputs
-    PORTC |= (1 << PC0) | (1 << PC1) | (1 << PC2) | (1 << PC6) | (1 << PC7);    // Pull-ups enabled
+    // PORTC |= (1 << PC0) | (1 << PC1) | (1 << PC2) | (1 << PC6) | (1 << PC7);    // Pull-ups enabled
     
     // Give the buttons time to stabilize
     _delay_ms(50);    // ===============================================
@@ -371,17 +368,18 @@ int main(void) {
                     USART_SendString("Speed MIN\r\n> ");
                 }
                 button_debounce_timer = 50;
-            }            // PC2: Direction Toggle button
+            }            
+            // PC2: Direction Toggle button
             if (button_pc2_prev == 1 && button_pc2_current == 0) {
                 scroll_direction = -scroll_direction; // Toggle between -1 and 1
                 
                 // Restart scrolling from the appropriate side
                 if (scroll_direction < 0) {
                     scroll_position = 32;  // Right to left: start from right
-                    USART_SendString("Dir: R>L\r\n> ");
+                    USART_SendString("Dir: L<-R\r\n> ");
                 } else {
                     scroll_position = -strlen(scroll_text) * 6;  // Left to right: start from left
-                    USART_SendString("Dir: L>R\r\n> ");
+                    USART_SendString("Dir: L->R\r\n> ");
                 }
                 button_debounce_timer = 50;
             }

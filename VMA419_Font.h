@@ -15,8 +15,6 @@
  *   vma419_font_init(&display);
  *   vma419_font_draw_string(&display, 0, 0, "Hello");
  * 
- * Author: Arnold Dsouza
- * Date: June 12, 2025
  */
 
 #ifndef VMA419_FONT_H
