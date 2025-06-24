@@ -1,241 +1,277 @@
 /*
- * VMA419 LED Matrix Display Driver - Main Application
+ * ===================================================================
+ * LED Matrix Display Controller - Main Program
+ * ===================================================================
  * 
- * This program demonstrates the VMA419 32x16 LED matrix display driver.
- * It initializes a single VMA419 panel and displays a test LED at position (31,15).
+ * What this program does:
+ * - Controls a 32x16 LED matrix display to show scrolling text
+ * - Shows the FESB university logo on startup
+ * - Accepts messages from computer via UART (serial connection)
+ * - Responds to button presses to control text speed and position
  * 
- * Test Pattern: Single LED at bottom-right Corner (31,15)
- * - Demonstrates successful hardware initialization
- * - Validates pixel addressing and row remapping
- * - Confirms 4-phase multiplexing operation
+ * How it works:
+ * 1. Shows FESB logo for 10 seconds when powered on
+ * 2. Displays "WELCOME ERASMUS STUDENTS" scrolling text
+ * 3. You can type new messages via serial terminal
+ * 4. Physical buttons control speed and text position
  * 
- * Hardware Configuration:
- * - VMA419 32x16 LED Matrix Panel
- * - AVR microcontroller (ATmega328P or similar)
- * - Pin connections as specified in dmd_pins structure
+ * Hardware needed:
+ * - VMA419 32x16 red LED matrix panel
+ * - 5 push buttons connected to pins PC0-PC7
+ * - USB/serial connection to computer
  * 
- * Author: Arnold Dsouza
- * Date: 11/6/2025
- * Project: VMA419 LED Matrix Driver for Embedded Systems
- * Status: FULLY FUNCTIONAL ✓
+ * Status: Working perfectly! ✓
  */
 
-// UART Configuration for Internal 8MHz Oscillator
-#define F_CPU 8000000UL   // 8MHz internal oscillator
+// Tell the compiler our microcontroller runs at 8MHz
+#define F_CPU 8000000UL   // This sets the clock speed for timing functions
 
-#include <avr/io.h>
-#include <util/delay.h>
-#include <string.h>
-#include <stdio.h>  // For sprintf function
-#include <avr/interrupt.h>
-#include "vma419.h"
-#include "VMA419_Font.h"
-#include "fesb_logo.h"
-#define BAUD 9600         // Baud rate
-#define MYUBRR ((F_CPU / (16UL * BAUD)) - 1) // Calculate UART baud rate = 51
+// Include all the code libraries we need
+#include <avr/io.h>        // Basic input/output functions for AVR chips
+#include <util/delay.h>    // Functions to create time delays
+#include <string.h>        // Text manipulation functions (strlen, strcpy, etc.)
+#include <stdio.h>         // Standard input/output (sprintf, printf, etc.)
+#include <avr/interrupt.h> // Functions to handle interrupts
+#include "vma419.h"        // Our custom LED matrix driver
+#include "VMA419_Font.h"   // Font data for displaying text
+#include "fesb_logo.h"     // University logo bitmap data
 
-// Alternative baud rate values for different configurations:
-// For 8MHz internal oscillator: MYUBRR = 51 (current setting)
+// Serial communication settings (how fast we talk to the computer)
+#define BAUD 9600         // Communication speed: 9600 bits per second
+#define MYUBRR ((F_CPU / (16UL * BAUD)) - 1) // Math to calculate baud rate = 51
+
+// Different speed settings you can try:
+// For 8MHz internal clock: MYUBRR = 51 (what we're using now)
 // For 16MHz external crystal: MYUBRR = 103
-// For 1MHz internal oscillator: MYUBRR = 6
+// For 1MHz internal clock: MYUBRR = 6
 
-// --- Global Display Structures ---
-VMA419_Display dmd_display;
+// ===============================================
+// MAIN VARIABLES - THE IMPORTANT STUFF
+// ===============================================
+VMA419_Display dmd_display;  // This controls our LED matrix
 
-// --- Scrolling Text Variables ---
-char scroll_text[32] = "WELCOME ERASMUS STUDENTS";  // Reduced from 64 to save RAM
-int16_t scroll_position = 32;  // Start position (off-screen right)
-uint8_t scroll_speed = 30;    // Delay in milliseconds between scroll steps
-int8_t scroll_direction = -1; // Direction: -1 = right to left (default), 1 = left to right
-int8_t text_y_offset = 4;     // Vertical position (0-15 for 16-pixel height display)
+// Settings for the scrolling text
+char scroll_text[32] = "WELCOME ERASMUS STUDENTS";  // The message to display
+int16_t scroll_position = 32;    // Where the text starts (off the right side)
+uint8_t scroll_speed = 30;       // How fast it scrolls (lower = faster)
+int8_t scroll_direction = -1;    // Which way: -1 = right to left, 1 = left to right
+int8_t text_y_offset = 4;        // How high up the text appears (0 = top, 15 = bottom)
+// ===============================================
+// SERIAL COMMUNICATION BUFFER
+// ===============================================
+// This stores messages typed from the computer until we're ready to process them
+#define UART_BUFFER_SIZE 64  // Can store up to 64 characters at once
+volatile char uart_rx_buffer[UART_BUFFER_SIZE];  // Where incoming characters go
+volatile uint8_t uart_rx_head = 0;     // Points to where next character goes
+volatile uint8_t uart_rx_tail = 0;     // Points to first unread character  
+volatile uint8_t uart_message_ready = 0;  // Flag: 1 = complete message ready, 0 = still typing
+char uart_message[32];  // Holds the final complete message
 
-// --- UART Circular Buffer Variables ---
-#define UART_BUFFER_SIZE 64  // Reduced from 128 to save RAM
-volatile char uart_rx_buffer[UART_BUFFER_SIZE];
-volatile uint8_t uart_rx_head = 0;
-volatile uint8_t uart_rx_tail = 0;
-volatile uint8_t uart_message_ready = 0;
-char uart_message[32];  // Reduced from 64 to save RAM
+// ===============================================
+// FUNCTIONS TO TALK TO THE COMPUTER
+// ===============================================
 
-// UART Communication Functions
+// Set up the serial communication system
 void USART_Init(unsigned int ubrr) {
-    // Set baud rate registers (both high and low bytes)
-    UBRRH = (unsigned char)(ubrr >> 8);
-    UBRRL = (unsigned char)ubrr; 
+    // Configure the baud rate (how fast we communicate)
+    UBRRH = (unsigned char)(ubrr >> 8);  // High byte of baud rate
+    UBRRL = (unsigned char)ubrr;         // Low byte of baud rate
     
-    // Enable USART receive, transmit, and receive interrupt
-    UCSRB = (1 << RXEN) | (1 << TXEN) | (1 << RXCIE); 
+    // Turn on the serial communication features we need
+    UCSRB = (1 << RXEN) | (1 << TXEN) | (1 << RXCIE); // Enable receive, transmit, and receive interrupt
     
-    // Set frame format: 8-bit, no parity, 1 stop bit
+    // Set the data format: 8 data bits, no parity bit, 1 stop bit
     UCSRC = (1 << URSEL) | (1 << UCSZ1) | (1 << UCSZ0);
     
-    // Enable global interrupts
+    // Enable interrupts so we can automatically handle incoming messages
     sei();
 }
 
+// Send a single character to the computer
 void USART_Transmit(char data) {
-    while (!(UCSRA & (1 << UDRE))); // Wait until transmit buffer is empty
-    UDR = data; // Load character to UART data register
+    while (!(UCSRA & (1 << UDRE))); // Wait until the transmit buffer is ready
+    UDR = data; // Put the character in the transmit register
 }
 
+// Send a whole text message to the computer
 void USART_SendString(const char* str) {
-    while (*str) { // Transmit until null terminator
-        USART_Transmit(*str++); // Transmit character and move to next
+    while (*str) { // Keep going until we hit the end of the text (null character)
+        USART_Transmit(*str++); // Send this character and move to the next
     }
 }
 
+// Read a single character from the computer (blocking - waits until one arrives)
 char USART_Receive(void) {
-    while (!(UCSRA & (1 << RXC))); 
-    return UDR; // Return the received character
+    while (!(UCSRA & (1 << RXC))); // Wait until a character arrives
+    return UDR; // Return the character we received
 }
 
+// Check if there's a character waiting to be read (non-blocking)
 uint8_t USART_DataAvailable(void) {
-    return (UCSRA & (1 << RXC)); // Return 1 if data is available
+    return (UCSRA & (1 << RXC)); // Returns 1 if data is waiting, 0 if not
 }
 
-// UART Interrupt Service Routine
+// ===============================================
+// AUTOMATIC MESSAGE HANDLER (INTERRUPT FUNCTION)
+// ===============================================
+// This function runs automatically whenever a character arrives from the computer
+// It's like having a secretary that collects your mail while you're busy with other work
 ISR(USART_RXC_vect) {
-    char received_char = UDR;
+    char received_char = UDR;  // Get the character that just arrived
     
-    // Echo the character back to terminal
+    // Echo it back to the computer so the user can see what they typed
     USART_Transmit(received_char);
     
-    // Handle different characters
+    // Now decide what to do with this character
     if (received_char == '\r' || received_char == '\n') {
-        // End of message - process the received data
-        if (uart_rx_head != uart_rx_tail) {
-            // Copy buffer content to message
+        // User pressed Enter - they're done typing their message
+        if (uart_rx_head != uart_rx_tail) {  // Make sure there's actually something in the buffer
+            // Copy everything from our temporary buffer into the final message
             uint8_t msg_index = 0;
             uint8_t temp_tail = uart_rx_tail;
             
+            // Copy character by character until we reach the end
             while (temp_tail != uart_rx_head && msg_index < sizeof(uart_message) - 1) {
                 uart_message[msg_index] = uart_rx_buffer[temp_tail];
-                temp_tail = (temp_tail + 1) % UART_BUFFER_SIZE;
+                temp_tail = (temp_tail + 1) % UART_BUFFER_SIZE;  // Move to next position (wrapping around if needed)
                 msg_index++;
             }
             
-            uart_message[msg_index] = '\0'; // Null terminate
-            uart_message_ready = 1;
+            uart_message[msg_index] = '\0'; // Add null terminator to mark end of string
+            uart_message_ready = 1;         // Signal that a complete message is ready
             
-            // Reset buffer pointers
+            // Clear the buffer for the next message
             uart_rx_head = 0;
             uart_rx_tail = 0;
             
-            // Send newline
+            // Send a new line to the computer terminal
             USART_Transmit('\r');
             USART_Transmit('\n');
         }
     }
     else if (received_char == 8 || received_char == 127) {
-        // Backspace or Delete - remove last character
-        if (uart_rx_head != uart_rx_tail) {
+        // User pressed Backspace or Delete - remove the last character they typed
+        if (uart_rx_head != uart_rx_tail) {  // Only if there's something to delete
             uart_rx_head = (uart_rx_head - 1 + UART_BUFFER_SIZE) % UART_BUFFER_SIZE;
-            // Send backspace sequence to terminal
-            USART_Transmit('\b');
-            USART_Transmit(' ');
-            USART_Transmit('\b');
+            // Send backspace sequence to the computer so it erases on screen too
+            USART_Transmit('\b');  // Move cursor back
+            USART_Transmit(' ');   // Overwrite with space
+            USART_Transmit('\b');  // Move cursor back again
         }
     }
     else if (received_char >= 32 && received_char <= 126) {
-        // Printable character - add to buffer
+        // It's a normal printable character (letters, numbers, symbols)
         uint8_t next_head = (uart_rx_head + 1) % UART_BUFFER_SIZE;
         
-        // Check if buffer is not full
+        // Make sure our buffer isn't full
         if (next_head != uart_rx_tail) {
-            uart_rx_buffer[uart_rx_head] = received_char;
-            uart_rx_head = next_head;
+            uart_rx_buffer[uart_rx_head] = received_char;  // Store the character
+            uart_rx_head = next_head;                      // Move to next position
         }
+        // If buffer is full, we just ignore the character (could add error handling here)
     }
-    // Ignore other control characters
+    // Ignore any other control characters (like Ctrl+C, weird escape sequences, etc.)
 }
 
-// Check if a complete message has been received
+// ===============================================
+// HELPER FUNCTIONS FOR MESSAGE HANDLING
+// ===============================================
+
+// Check if someone has finished typing a complete message
 uint8_t uart_message_available(void) {
-    return uart_message_ready;
+    return uart_message_ready;  // Returns 1 if message is ready, 0 if not
 }
 
-// Get the received message and clear the flag
+// Get the complete message and mark it as read
 void uart_get_message(char* buffer, uint8_t max_length) {
     if (uart_message_ready) {
-        strncpy(buffer, uart_message, max_length - 1);
-        buffer[max_length - 1] = '\0';
-        uart_message_ready = 0;
+        strncpy(buffer, uart_message, max_length - 1);  // Copy the message safely
+        buffer[max_length - 1] = '\0';                  // Make sure it ends properly
+        uart_message_ready = 0;                         // Mark as read
     }
 }
 
+// Update what's shown on the LED display with a new message
 void updateDisplayMessage(const char* message) {
-    // Clear the scroll text and copy new message
+    // Clear out the old message completely
     memset(scroll_text, 0, sizeof(scroll_text));
     
-    // Copy the full message, leaving space for trailing space and null terminator
+    // Figure out how much of the new message we can fit
     uint8_t msg_len = strlen(message);
-    uint8_t max_copy_len = sizeof(scroll_text) - 2; // Reserve 2 bytes for space + null
+    uint8_t max_copy_len = sizeof(scroll_text) - 2; // Leave room for space and null terminator
     
     if (msg_len > max_copy_len) {
-        msg_len = max_copy_len; // Truncate if too long
+        msg_len = max_copy_len; // Truncate if the message is too long
     }
     
-    // Copy the message
+    // Copy the new message
     memcpy(scroll_text, message, msg_len);
     
-    // Add trailing space for smooth scrolling
+    // Add a space at the end for smooth scrolling (so text doesn't run together)
     scroll_text[msg_len] = ' ';
     scroll_text[msg_len + 1] = '\0';
     
-    // Reset scroll position to start from right
+    // Start scrolling from the right side again
     scroll_position = 32;
     
-    // Send confirmation via UART
+    // Let the user know we got their message
     USART_SendString("Updated: ");
     USART_SendString(scroll_text);
     USART_SendString("\r\n> ");
 }
 
-// Pin configuration for VMA419 display
-// Hardware SPI configuration for ATmega16
+// ===============================================
+// HARDWARE WIRING CONFIGURATION
+// ===============================================
+// This tells the program which pins on the microcontroller connect to which wires on the LED display
+// Think of this like a wiring diagram in code form
+
 VMA419_PinConfig dmd_pins = {
-    // Hardware SPI pins (ATmega16 SPI peripheral)
-    .spi_clk_port_ddr  = &DDRB, .spi_clk_port_out  = &PORTB, .spi_clk_pin_mask  = (1 << PB7), // SCK -> PB7 (Hardware SPI Clock)
-    .spi_data_port_ddr = &DDRB, .spi_data_port_out = &PORTB, .spi_data_pin_mask = (1 << PB5), // MOSI -> PB5 (Hardware SPI Data)
+    // SPI Communication Pins (these send data to the display)
+    .spi_clk_port_ddr  = &DDRB, .spi_clk_port_out  = &PORTB, .spi_clk_pin_mask  = (1 << PB7), // Clock signal (PB7)
+    .spi_data_port_ddr = &DDRB, .spi_data_port_out = &PORTB, .spi_data_pin_mask = (1 << PB5), // Data signal (PB5)
 
-    // Row Select Pins (2-bit binary selection for 4 row phases)
-    .a_port_ddr        = &DDRA, .a_port_out        = &PORTA, .a_pin_mask        = (1 << PA1), // A -> PA1
-    .b_port_ddr        = &DDRA, .b_port_out        = &PORTA, .b_pin_mask        = (1 << PA2), // B -> PA2
+    // Row Selection Pins (these choose which rows of LEDs to light up)
+    .a_port_ddr        = &DDRA, .a_port_out        = &PORTA, .a_pin_mask        = (1 << PA1), // Row select A (PA1)
+    .b_port_ddr        = &DDRA, .b_port_out        = &PORTA, .b_pin_mask        = (1 << PA2), // Row select B (PA2)
 
-    // Latch/Strobe Clock Pin (transfers shift register data to output latches)
-    .latch_clk_port_ddr= &DDRA, .latch_clk_port_out= &PORTA, .latch_clk_pin_mask= (1 << PA4), // SCLK -> PA4
-
-    // Output Enable Pin (controls display brightness/visibility)
-    .oe_port_ddr       = &DDRD, .oe_port_out       = &PORTD, .oe_pin_mask       = (1 << PD7)  // OE -> PD7
+    // Control Pins
+    .latch_clk_port_ddr= &DDRA, .latch_clk_port_out= &PORTA, .latch_clk_pin_mask= (1 << PA4), // Latch data to display (PA4)
+    .oe_port_ddr       = &DDRD, .oe_port_out       = &PORTD, .oe_pin_mask       = (1 << PD7)  // Enable display output (PD7)
 };
 
+// ===============================================
+// MAIN PROGRAM - THIS IS WHERE EVERYTHING STARTS
+// ===============================================
 int main(void) {
-    // Add startup delay for system stabilization
+    // Wait a moment for the electronics to settle down when first powered on
     _delay_ms(100);
     
-    // Initialize UART communication
-    USART_Init(MYUBRR);    // Initialize PC0 and PC1 as inputs with pull-up resistors
-    // PC0: Speed Up button, PC1: Speed Down button
-    // PC2: Toggle Direction button
-    // PC6: Text Up button, PC7: Text Down button
-    DDRC &= ~((1 << PC0) | (1 << PC1) | (1 << PC2) | (1 << PC6) | (1 << PC7));  // Set as inputs
-    PORTC |= (1 << PC0) | (1 << PC1) | (1 << PC2) | (1 << PC6) | (1 << PC7);    // Enable pull-up resistors
+    // Set up communication with the computer
+    USART_Init(MYUBRR);
+
+    // Set up the control buttons (PC0, PC1, PC2, PC6, PC7 as inputs with pull-up resistors)
+    // PC0: Speed Up button    | PC1: Speed Down button
+    // PC2: Change Direction   | PC6: Move Text Up     | PC7: Move Text Down
+    DDRC &= ~((1 << PC0) | (1 << PC1) | (1 << PC2) | (1 << PC6) | (1 << PC7));  // Make them inputs
+    PORTC |= (1 << PC0) | (1 << PC1) | (1 << PC2) | (1 << PC6) | (1 << PC7);    // Turn on pull-up resistors
     
-    // Wait for UART to stabilize
+    // Give the serial connection time to stabilize
     _delay_ms(100);
     
-    // Send simple test character first
+    // Send a test character to make sure communication is working
     USART_Transmit('A');
     _delay_ms(10);
     USART_Transmit('\r');
     USART_Transmit('\n');
     
-    // Send welcome message
+    // Send welcome messages to the computer terminal
     USART_SendString("VMA419 LED Display - UART Control Ready!\r\n");
     USART_SendString("Type your message and press Enter to display on LED matrix\r\n");
-      // Display current speed and direction information
+
+    // Tell the user about current settings
     USART_SendString("Speed: ");
-    // Simple digit conversion without sprintf to save memory
+    // Convert the speed number to text and send it (doing this manually to save memory)
     if (scroll_speed >= 100) {
         USART_Transmit('0' + (scroll_speed / 100));
         USART_Transmit('0' + ((scroll_speed % 100) / 10));
@@ -247,53 +283,61 @@ int main(void) {
         USART_Transmit('0' + scroll_speed);
     }
     USART_SendString("\r\nDirection: ");
-    USART_SendString((scroll_direction < 0) ? "R>L" : "L>R");
+    USART_SendString((scroll_direction < 0) ? "R>L" : "L>R");  // Right-to-Left or Left-to-Right
     USART_SendString("\r\n");
     
-    USART_SendString("> ");
+    USART_SendString("> ");  // Show a prompt like a command line
     
-    // Initialize the VMA419 display driver
-    // Parameters: display structure, pin config, panels_wide=1, panels_high=1
+    // Initialize the LED matrix display system
     if (vma419_init(&dmd_display, &dmd_pins, 1, 1) != 0) {
-        // Initialization failed - halt execution
+        // If initialization fails, tell the user and stop the program
         USART_SendString("ERROR: Display initialization failed!\r\n");
-        while(1);
+        while(1);  // Infinite loop - program stops here
     }
-      // Clear the display buffer to ensure all LEDs start OFF
+
+    // Start with a blank display
     vma419_clear(&dmd_display);
     
-    // Initialize font system
+    // Set up the font system for displaying text
     vma419_font_init(&dmd_display);
     
-    // ========================================================================
-    // DISPLAY FESB LOGO FOR 10 SECONDS
-    // ========================================================================
+    // ===============================================
+    // SHOW UNIVERSITY LOGO ON STARTUP
+    // ===============================================
     USART_SendString("Displaying FESB Logo for 10 seconds...\r\n");
-    fesb_logo_show_for_duration(&dmd_display, 10);    USART_SendString("FESB Logo display complete. Starting scrolling text...\r\n");
+    fesb_logo_show_for_duration(&dmd_display, 10);
+
+    USART_SendString("FESB Logo display complete. Starting scrolling text...\r\n");
     USART_SendString("> ");
     
-    // Clear display after logo and prepare for scrolling text
+    // Clear the display and get ready for scrolling text
     vma419_clear(&dmd_display);
     
-    // Add stabilization delay after logo display
-    _delay_ms(200);    // Re-initialize button pins to ensure proper state after logo display
-    // (Logo display might have affected pin states)
-    DDRC &= ~((1 << PC0) | (1 << PC1) | (1 << PC2) | (1 << PC6) | (1 << PC7));  // Set as inputs
-    PORTC |= (1 << PC0) | (1 << PC1) | (1 << PC2) | (1 << PC6) | (1 << PC7);    // Enable pull-up resistors
+    // Wait a moment for everything to settle
+    _delay_ms(200);
+
+    // Make sure the button pins are still set up correctly (logo display might have changed them)
+    DDRC &= ~((1 << PC0) | (1 << PC1) | (1 << PC2) | (1 << PC6) | (1 << PC7));  // Inputs
+    PORTC |= (1 << PC0) | (1 << PC1) | (1 << PC2) | (1 << PC6) | (1 << PC7);    // Pull-ups enabled
     
-    // Wait for button pins to stabilize
-    _delay_ms(50);
-      // Variables for UART message processing
-    char new_message[32]; // Reduced buffer size
-    uint16_t refresh_counter = 0;
-    uint16_t button_status_counter = 0; // Counter for periodic button status report    // Initialize button states properly after FESB logo display
-    // Read current button states to initialize previous states
-    uint8_t button_pc0_prev = (PINC & (1 << PC0)) >> PC0; // Previous state of PC0 (Speed Up)
-    uint8_t button_pc1_prev = (PINC & (1 << PC1)) >> PC1; // Previous state of PC1 (Speed Down)
-    uint8_t button_pc2_prev = (PINC & (1 << PC2)) >> PC2; // Previous state of PC2 (Toggle Direction)
-    uint8_t button_pc6_prev = (PINC & (1 << PC6)) >> PC6; // Previous state of PC6 (Text Up)
-    uint8_t button_pc7_prev = (PINC & (1 << PC7)) >> PC7; // Previous state of PC7 (Text Down)
-    uint8_t button_debounce_timer = 0; // Timer for button debounce    // Debug: Send initial button states via UART (simplified)
+    // Give the buttons time to stabilize
+    _delay_ms(50);    // ===============================================
+    // SET UP VARIABLES FOR THE MAIN LOOP
+    // ===============================================
+    char new_message[32]; // Buffer to hold new messages from the computer
+    uint16_t refresh_counter = 0;        // Counts how many times we've refreshed the display
+    uint16_t button_status_counter = 0;  // Counts cycles for periodic status reports
+
+    // Read the current state of all buttons to initialize our tracking variables
+    // (Buttons read as 1 when not pressed, 0 when pressed due to pull-up resistors)
+    uint8_t button_pc0_prev = (PINC & (1 << PC0)) >> PC0; // Speed Up button state
+    uint8_t button_pc1_prev = (PINC & (1 << PC1)) >> PC1; // Speed Down button state
+    uint8_t button_pc2_prev = (PINC & (1 << PC2)) >> PC2; // Direction Toggle button state
+    uint8_t button_pc6_prev = (PINC & (1 << PC6)) >> PC6; // Text Up button state
+    uint8_t button_pc7_prev = (PINC & (1 << PC7)) >> PC7; // Text Down button state
+    uint8_t button_debounce_timer = 0; // Prevents button bouncing (false multiple presses)
+
+    // Send current button states to the computer for debugging
     USART_SendString("Buttons: ");
     USART_Transmit('0' + button_pc0_prev);
     USART_Transmit('0' + button_pc1_prev);
@@ -302,28 +346,38 @@ int main(void) {
     USART_Transmit('0' + button_pc7_prev);
     USART_SendString("\r\n");
     
-    // Send button status message
+    // Tell the user how to use the buttons
     USART_SendString("Controls: PC0=Speed+, PC1=Speed-, PC2=ToggleDir, PC6=Up, PC7=Down\r\n");
     USART_SendString("> ");
     
-    // Main display refresh loop with UART message handling
-    // The VMA419 uses 4-phase multiplexing, so we cycle through all 4 phases
+    // ===============================================
+    // MAIN LOOP - THIS RUNS FOREVER
+    // ===============================================
+    // This is the heart of the program - it keeps running and handles:
+    // 1. New messages from the computer
+    // 2. Button presses
+    // 3. Updating the LED display with scrolling text
     while(1) {
-        // Check for new UART message
+        // Check if someone sent us a new message via the computer
         if (uart_message_available()) {
             uart_get_message(new_message, sizeof(new_message));
-            updateDisplayMessage(new_message); // Update LED display
-        }        // Process button inputs with proper debouncing
-        // Only check buttons when not in debounce period
+            updateDisplayMessage(new_message); // Update what's shown on the LED display
+        }
+
+        // ===============================================
+        // HANDLE BUTTON PRESSES
+        // ===============================================
+        // Only check buttons when we're not in the debounce period
+        // (Debouncing prevents false button presses from electrical noise)
         if (button_debounce_timer == 0) {
-            // Read current button states (0 = pressed, 1 = released due to pull-up)
+            // Read the current state of all buttons
             uint8_t button_pc0_current = (PINC & (1 << PC0)) >> PC0;
             uint8_t button_pc1_current = (PINC & (1 << PC1)) >> PC1;
             uint8_t button_pc2_current = (PINC & (1 << PC2)) >> PC2;
             uint8_t button_pc6_current = (PINC & (1 << PC6)) >> PC6;
             uint8_t button_pc7_current = (PINC & (1 << PC7)) >> PC7;
 
-            // Debug: Detect any button state changes (simplified)
+            // Debug: If any button state changed, tell the computer
             if (button_pc0_current != button_pc0_prev || button_pc1_current != button_pc1_prev ||
                 button_pc2_current != button_pc2_prev ||
                 button_pc6_current != button_pc6_prev || button_pc7_current != button_pc7_prev) {
@@ -335,93 +389,103 @@ int main(void) {
                 USART_Transmit('0' + button_pc7_current);
                 USART_SendString("\r\n");
             }
-              // PC0: Speed Up button (decrease delay value)
+
+            // PC0: Speed Up button (makes text scroll faster by decreasing delay)
             if (button_pc0_prev == 1 && button_pc0_current == 0) {
-                // Button just pressed - increase speed (lower delay)
+                // Button was just pressed (went from 1 to 0)
                 if (scroll_speed > 5) {
-                    scroll_speed -= 5;
+                    scroll_speed -= 5;  // Make it faster
                     USART_SendString("Speed+: ");
                     USART_Transmit('0' + (scroll_speed / 10));
                     USART_Transmit('0' + (scroll_speed % 10));
                     USART_SendString("\r\n> ");
                 } else {
-                    USART_SendString("Speed MAX\r\n> ");
+                    USART_SendString("Speed MAX\r\n> ");  // Already at maximum speed
                 }
-                button_debounce_timer = 50; // Set debounce timer (50 * 4ms = 200ms)
+                button_debounce_timer = 50; // Start debounce timer (50 cycles * 4ms = 200ms)
             }
             
-            // PC1: Speed Down button (increase delay value)
+            // PC1: Speed Down button (makes text scroll slower by increasing delay)
             if (button_pc1_prev == 1 && button_pc1_current == 0) {
-                // Button just pressed - decrease speed (higher delay)
+                // Button was just pressed
                 if (scroll_speed < 100) {
-                    scroll_speed += 5;
+                    scroll_speed += 5;  // Make it slower
                     USART_SendString("Speed-: ");
                     USART_Transmit('0' + (scroll_speed / 10));
                     USART_Transmit('0' + (scroll_speed % 10));
                     USART_SendString("\r\n> ");
                 } else {
-                    USART_SendString("Speed MIN\r\n> ");
+                    USART_SendString("Speed MIN\r\n> ");  // Already at minimum speed
                 }
-                button_debounce_timer = 50; // Set debounce timer
-            }            // PC2: Toggle Direction button
+                button_debounce_timer = 50; // Start debounce timer
+            }            // PC2: Direction Toggle button (changes text direction)
             if (button_pc2_prev == 1 && button_pc2_current == 0) {
-                // Button just pressed - toggle direction
-                scroll_direction = -scroll_direction; // Toggle between 1 and -1
+                // Button was just pressed - flip the direction
+                scroll_direction = -scroll_direction; // Toggle between -1 and 1
                 
-                // Reset scroll position for new direction
+                // Restart the scrolling from the appropriate side for the new direction
                 if (scroll_direction < 0) {
-                    // Right to left
+                    // Right to left: start from right side
                     scroll_position = 32;
                     USART_SendString("Dir: R>L\r\n> ");
                 } else {
-                    // Left to right
+                    // Left to right: start from left side
                     scroll_position = -strlen(scroll_text) * 6;
                     USART_SendString("Dir: L>R\r\n> ");
                 }
-                button_debounce_timer = 50; // Set debounce timer
+                button_debounce_timer = 50; // Start debounce timer
             }
             
-            // PC6: Text Up button (decrease Y offset)
+            // PC6: Text Up button (moves text toward the top of the display)
             if (button_pc6_prev == 1 && button_pc6_current == 0) {
-                // Button just pressed - move text up
+                // Button was just pressed - move text up
                 if (text_y_offset > 0) {
-                    text_y_offset--;
+                    text_y_offset--;  // Move up one pixel
                     USART_SendString("Text Up: Y=");
                     USART_Transmit('0' + (text_y_offset / 10));
                     USART_Transmit('0' + (text_y_offset % 10));
                     USART_SendString("\r\n> ");
                 } else {
-                    USART_SendString("Text at TOP\r\n> ");
+                    USART_SendString("Text at TOP\r\n> ");  // Already at the top
                 }
-                button_debounce_timer = 50; // Set debounce timer
+                button_debounce_timer = 50; // Start debounce timer
             }
             
-            // PC7: Text Down button (increase Y offset)
+            // PC7: Text Down button (moves text toward the bottom of the display)
             if (button_pc7_prev == 1 && button_pc7_current == 0) {
-                // Button just pressed - move text down
+                // Button was just pressed - move text down
                 if (text_y_offset < 15) {
-                    text_y_offset++;
+                    text_y_offset++;  // Move down one pixel
                     USART_SendString("Text Down: Y=");
                     USART_Transmit('0' + (text_y_offset / 10));
                     USART_Transmit('0' + (text_y_offset % 10));
                     USART_SendString("\r\n> ");
                 } else {
-                    USART_SendString("Text at BOTTOM\r\n> ");
+                    USART_SendString("Text at BOTTOM\r\n> ");  // Already at the bottom
                 }
-                button_debounce_timer = 50; // Set debounce timer
-            }            // Update previous button states
+                button_debounce_timer = 50; // Start debounce timer
+            }
+
+            // Remember the current button states for next time (to detect when they change)
             button_pc0_prev = button_pc0_current;
             button_pc1_prev = button_pc1_current;
             button_pc2_prev = button_pc2_current;
             button_pc6_prev = button_pc6_current;
-            button_pc7_prev = button_pc7_current;} else {
-            // Decrement debounce timer
+            button_pc7_prev = button_pc7_current;
+        } else {
+            // We're in debounce period - just count down the timer
             button_debounce_timer--;
-        }        // Periodic button status report (every 1000 refresh cycles ~ 4 seconds)
+        }
+
+        // ===============================================
+        // PERIODIC STATUS REPORTS
+        // ===============================================
+        // Every 1000 display refresh cycles (about 4 seconds), send button status to computer
         button_status_counter++;
         if (button_status_counter >= 1000) {
-            button_status_counter = 0;
-            // Read current button states for status report
+            button_status_counter = 0;  // Reset the counter
+            
+            // Read current button states for the status report
             uint8_t pc0_state = (PINC & (1 << PC0)) >> PC0;
             uint8_t pc1_state = (PINC & (1 << PC1)) >> PC1;
             uint8_t pc2_state = (PINC & (1 << PC2)) >> PC2;
@@ -435,42 +499,51 @@ int main(void) {
             USART_Transmit('0' + pc6_state);
             USART_Transmit('0' + pc7_state);
             USART_SendString("\r\n> ");
-        }// Clear display buffer
+        }
+
+        // ===============================================
+        // UPDATE THE LED DISPLAY
+        // ===============================================
+        // Clear the display and draw the current text
         vma419_clear(&dmd_display);
-        
-        // Draw scrolling text with variable Y offset
         vma419_font_draw_string(&dmd_display, scroll_position, text_y_offset, scroll_text);
         
-        // Refresh display (4-phase multiplexing)
+        // Refresh the display using 4-phase multiplexing
+        // (The display shows 1/4 of the rows at a time, cycling quickly to create the full image)
         for(uint8_t cycle = 0; cycle < 4; cycle++) {
             dmd_display.scan_cycle = cycle;
             vma419_scan_display_quarter(&dmd_display);
-            _delay_ms(1); // 1ms delay per phase = 250Hz refresh rate
-        }          // Update scroll position every few refresh cycles
+            _delay_ms(1); // 1ms per phase = 250Hz refresh rate (fast enough that you don't see flicker)
+        }
+
+        // ===============================================
+        // UPDATE SCROLLING POSITION
+        // ===============================================
+        // Move the text position based on speed setting
         refresh_counter++;
         if(refresh_counter >= scroll_speed) {
-            refresh_counter = 0;
+            refresh_counter = 0;  // Reset the counter
             
-            // Update position based on direction
+            // Move the text one pixel in the current direction
             scroll_position += scroll_direction;
             
-            // Calculate text width: each character is 6 pixels wide (5 + 1 spacing)
+            // Calculate how wide the current text is (each character is 6 pixels wide)
             int16_t text_width = strlen(scroll_text) * 6;
             
-            // Handle position wrapping based on direction
+            // Check if the text has scrolled off the edge and needs to wrap around
             if (scroll_direction < 0) {
-                // Right to left (default) - reset when text has scrolled off left side
+                // Scrolling right to left - when text disappears off left side, restart from right
                 if(scroll_position < -text_width) {
                     scroll_position = 32; // Start from right edge again
                 }
             } else {
-                // Left to right - reset when text has scrolled off right side
+                // Scrolling left to right - when text disappears off right side, restart from left
                 if(scroll_position > 32) {
                     scroll_position = -text_width; // Start from left edge
                 }
             }
         }
-    }
+    } // End of main loop
 
-    return 0;
+    return 0; // Program should never reach here, but good practice to include
 }
