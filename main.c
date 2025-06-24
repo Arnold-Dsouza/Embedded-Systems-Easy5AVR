@@ -20,13 +20,10 @@
  * - 5 push buttons connected to pins PC0-PC7
  * - USB/serial connection to computer
  * 
- * Status: Working perfectly! ✓
  */
 
-// Tell the compiler our microcontroller runs at 8MHz
-#define F_CPU 8000000UL   // This sets the clock speed for timing functions
+#define F_CPU 8000000UL   
 
-// Include all the code libraries we need
 #include <avr/io.h>        // Basic input/output functions for AVR chips
 #include <util/delay.h>    // Functions to create time delays
 #include <string.h>        // Text manipulation functions (strlen, strcpy, etc.)
@@ -36,14 +33,8 @@
 #include "VMA419_Font.h"   // Font data for displaying text
 #include "fesb_logo.h"     // University logo bitmap data
 
-// Serial communication settings (how fast we talk to the computer)
 #define BAUD 9600         // Communication speed: 9600 bits per second
 #define MYUBRR ((F_CPU / (16UL * BAUD)) - 1) // Math to calculate baud rate = 51
-
-// Different speed settings you can try:
-// For 8MHz internal clock: MYUBRR = 51 (what we're using now)
-// For 16MHz external crystal: MYUBRR = 103
-// For 1MHz internal clock: MYUBRR = 6
 
 // ===============================================
 // MAIN VARIABLES - THE IMPORTANT STUFF
