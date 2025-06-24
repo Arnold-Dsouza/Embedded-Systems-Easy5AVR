@@ -294,7 +294,9 @@ int main(void) {
     // PORTC |= (1 << PC0) | (1 << PC1) | (1 << PC2) | (1 << PC6) | (1 << PC7);    // Pull-ups enabled
     
     // Give the buttons time to stabilize
-    _delay_ms(50);    // ===============================================
+    _delay_ms(50);    
+    
+    // ===============================================
     // SET UP VARIABLES FOR THE MAIN LOOP
     // ===============================================
     char new_message[32]; // Buffer to hold new messages from the computer

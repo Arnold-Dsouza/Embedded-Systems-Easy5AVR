@@ -42,7 +42,6 @@
 
 // Memory calculation: How much RAM we need to store the entire display image
 // Math: (32 pixels ÷ 8 bits per byte) × 16 rows = 4 × 16 = 64 bytes total
-// That's tiny! Your phone's camera takes pictures that are millions of bytes
 #define VMA419_RAM_SIZE_BYTES          ((VMA419_PIXELS_ACROSS_PER_PANEL*VMA419_BITSPERPIXEL/8)*VMA419_PIXELS_DOWN_PER_PANEL)
 
 //------------------------------------------------------------------------------
