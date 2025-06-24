@@ -207,12 +207,9 @@ void updateDisplayMessage(const char* message) {
 // ===============================================
 // This tells the program which pins on the microcontroller connect to which wires on the LED display
 // Think of this like a wiring diagram in code form
+// Note: SPI pins (MOSI=PB5, SCK=PB7) are automatically configured by hardware SPI
 
 VMA419_PinConfig dmd_pins = {
-    // SPI Communication Pins (these send data to the display)
-    .spi_clk_port_ddr  = &DDRB, .spi_clk_port_out  = &PORTB, .spi_clk_pin_mask  = (1 << PB7), // Clock signal (PB7)
-    .spi_data_port_ddr = &DDRB, .spi_data_port_out = &PORTB, .spi_data_pin_mask = (1 << PB5), // Data signal (PB5)
-
     // Row Selection Pins (these choose which rows of LEDs to light up)
     .a_port_ddr        = &DDRA, .a_port_out        = &PORTA, .a_pin_mask        = (1 << PA1), // Row select A (PA1)
     .b_port_ddr        = &DDRA, .b_port_out        = &PORTA, .b_pin_mask        = (1 << PA2), // Row select B (PA2)
@@ -440,7 +437,8 @@ int main(void) {
             dmd_display.scan_cycle = cycle;
             vma419_scan_display_quarter(&dmd_display);
             _delay_ms(1);
-        }        // ===============================================
+        }        
+        // ===============================================
         // UPDATE SCROLLING POSITION
         // ===============================================
         refresh_counter++;

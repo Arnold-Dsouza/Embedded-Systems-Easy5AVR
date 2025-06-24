@@ -2,17 +2,17 @@
  * VMA419 LED Matrix Display Driver Implementation
  * 
  * This file contains the implementation of the VMA419 32x16 LED matrix display driver.
- * The driver supports 4-phase multiplexing similar to the DMD419 library architecture.
+ * The driver supports 4-phase multiplexing using hardware SPI for optimal performance.
  * 
  * Key Features:
  * - 32x16 pixel resolution per panel
  * - 4-phase row multiplexing (rows 0,4,8,12 → 1,5,9,13 → 2,6,10,14 → 3,7,11,15)
  * - Row remapping for correct physical display
- * - SPI bit-banging for data transmission
+ * - Hardware SPI for fast data transmission
  * - Multiple graphics modes (NORMAL, INVERSE, TOGGLE, OR, NOR)
  * 
  * Hardware Interface:
- * - SPI CLK and DATA pins for shift register data
+ * - Hardware SPI pins (MOSI, SCK) for data transmission
  * - A and B pins for row selection (2-bit binary)
  * - LATCH pin for transferring data to output latches
  * - OE (Output Enable) pin for display brightness control
@@ -22,97 +22,60 @@
  * - 1 bit per pixel (1=LED ON, 0=LED OFF)
  * - Frame buffer organized by panels and rows
  * 
- * Author: Arnold Dsouza
- * Date: 11/6/2025
- * Project: VMA419 LED Matrix Driver for Embedded Systems
  */
 
 #include "vma419.h"
-#include <stdlib.h> // For malloc, free
-#include <string.h> // For memset
+#include <stdlib.h> 
+#include <string.h> 
 #include <util/delay.h>
 
-// --- Private Helper Macros for Pin Control ---
+// ===============================================
+// HELPER MACROS FOR PIN CONTROL
+// ===============================================
 #define PIN_MODE_OUTPUT(ddr_reg, pin_mask) (*(ddr_reg) |= (pin_mask))
 #define PIN_SET_HIGH(port_reg, pin_mask)   (*(port_reg) |= (pin_mask))
 #define PIN_SET_LOW(port_reg, pin_mask)    (*(port_reg) &= ~(pin_mask))
 
-// --- SPI Configuration ---
-// Set to 1 for hardware SPI, 0 for bit-banging
-#define USE_HARDWARE_SPI 1
-
-// Global pointer for SPI operations
-static VMA419_Display* g_spi_display = NULL;
+// ===============================================
+// HARDWARE SPI FUNCTIONS
+// ===============================================
 
 /**
- * Initialize SPI communication for VMA419 display
- * 
- * @param disp Pointer to VMA419 display structure
+ * Initialize hardware SPI for VMA419 display communication
+ * Configures ATmega16 SPI peripheral for optimal performance
  */
-static void spi_init(VMA419_Display* disp) {
-    g_spi_display = disp; // Store display pointer for operations
-    
-#if USE_HARDWARE_SPI
-    // Hardware SPI initialization for ATmega16
-    // SPI pins: MOSI (PB5), SCK (PB7), SS (PB4)
-    
-    // Set SPI pins as outputs (MOSI, SCK, SS)
+static void spi_init(void) {
+    // Set SPI pins as outputs (MOSI=PB5, SCK=PB7, SS=PB4)
     DDRB |= (1 << PB5) | (1 << PB7) | (1 << PB4);
     
-    // Configure SPI Control Register (SPCR)
+    // Configure SPI Control Register for maximum speed
     SPCR = (1 << SPE) |     // SPI Enable
            (1 << MSTR) |    // Master mode
-           (0 << CPOL) |    // Clock polarity: idle low (compatible with VMA419)
+           (0 << CPOL) |    // Clock polarity: idle low
            (0 << CPHA) |    // Clock phase: sample on leading edge
            (0 << SPR1) |    // SPI Speed: fosc/4 (fastest)
            (0 << SPR0);
     
-    // Clear double speed bit for standard SPI timing
+    // Standard SPI timing (no double speed)
     SPSR &= ~(1 << SPI2X);
     
     // Set SS pin high (not used but good practice)
     PORTB |= (1 << PB4);
-#endif
 }
 
 /**
- * Transfer one byte of data via SPI to the VMA419 display
- * Uses hardware SPI for high-speed data transmission
+ * Send one byte via hardware SPI to the VMA419 display
+ * Uses ATmega16 SPI peripheral for fast data transmission
  * 
  * @param data Byte to transmit (MSB first)
  */
 static void spi_transfer(uint8_t data) {
-    if (!g_spi_display) return;
-    
-    // VMA419 uses direct data transmission (1=LED ON, 0=LED OFF)
-    // No data inversion needed unlike some other LED matrix drivers
-    
-#if USE_HARDWARE_SPI
-    // Hardware SPI transfer for ATmega16
+    // Hardware SPI transfer
     SPDR = data;                        // Load data into SPI Data Register
     while (!(SPSR & (1 << SPIF)));      // Wait for transmission complete
-    // Note: Reading SPSR and SPDR clears the SPIF flag automatically
+    // Reading SPSR and SPDR clears the SPIF flag automatically
     volatile uint8_t dummy = SPDR;      // Clear SPIF by reading SPDR
     (void)dummy;                        // Suppress unused variable warning
-#else
-    // Bit-bang SPI transfer - transmit MSB first
-    for (uint8_t bit = 0; bit < 8; bit++) {
-        // Set data line based on MSB of current data
-        if (data & 0x80) {
-            PIN_SET_HIGH(g_spi_display->pins.spi_data_port_out, g_spi_display->pins.spi_data_pin_mask);
-        } else {
-            PIN_SET_LOW(g_spi_display->pins.spi_data_port_out, g_spi_display->pins.spi_data_pin_mask);
-        }
-        
-        // Generate clock pulse: HIGH -> LOW
-        PIN_SET_HIGH(g_spi_display->pins.spi_clk_port_out, g_spi_display->pins.spi_clk_pin_mask);
-        _delay_us(2); // Clock high duration
-        PIN_SET_LOW(g_spi_display->pins.spi_clk_port_out, g_spi_display->pins.spi_clk_pin_mask);
-        _delay_us(2); // Clock low duration
-        
-        data <<= 1; // Shift to next bit
-    }
-#endif
 }
 
 
@@ -150,33 +113,20 @@ int vma419_init(VMA419_Display* disp, VMA419_PinConfig* pin_config, uint8_t pane
     disp->frame_buffer = (uint8_t*)malloc(disp->frame_buffer_size);
     if (!disp->frame_buffer) {
         return -1; // Memory allocation failed
-    }
-
-    // Configure GPIO pins as outputs
+    }    // Configure GPIO pins as outputs
     PIN_MODE_OUTPUT(disp->pins.oe_port_ddr, disp->pins.oe_pin_mask);
     PIN_MODE_OUTPUT(disp->pins.a_port_ddr, disp->pins.a_pin_mask);
     PIN_MODE_OUTPUT(disp->pins.b_port_ddr, disp->pins.b_pin_mask);
     PIN_MODE_OUTPUT(disp->pins.latch_clk_port_ddr, disp->pins.latch_clk_pin_mask);
-    
-#if !USE_HARDWARE_SPI
-    // Configure SPI pins as outputs only if using bit-banging
-    PIN_MODE_OUTPUT(disp->pins.spi_clk_port_ddr, disp->pins.spi_clk_pin_mask);
-    PIN_MODE_OUTPUT(disp->pins.spi_data_port_ddr, disp->pins.spi_data_pin_mask);
-#endif
 
     // Set initial pin states
     PIN_SET_HIGH(disp->pins.oe_port_out, disp->pins.oe_pin_mask); // OE high = display disabled
     PIN_SET_LOW(disp->pins.a_port_out, disp->pins.a_pin_mask);    // Row select A = 0
     PIN_SET_LOW(disp->pins.b_port_out, disp->pins.b_pin_mask);    // Row select B = 0
     PIN_SET_LOW(disp->pins.latch_clk_port_out, disp->pins.latch_clk_pin_mask); // Latch low
-    
-#if !USE_HARDWARE_SPI
-    PIN_SET_LOW(disp->pins.spi_clk_port_out, disp->pins.spi_clk_pin_mask);   // SPI clock low
-    PIN_SET_LOW(disp->pins.spi_data_port_out, disp->pins.spi_data_pin_mask); // SPI data low
-#endif
 
-    // Initialize SPI and clear display
-    spi_init(disp);
+    // Initialize hardware SPI and clear display
+    spi_init();
     vma419_clear(disp);
     disp->scan_cycle = 0; // Start with first scan phase
 
@@ -492,10 +442,9 @@ void vma419_scan_display_quarter(VMA419_Display* disp) {
  * - 1 bit per pixel (1=LED ON, 0=LED OFF)
  * - Column-major bit ordering within bytes
  * - Supports multiple panels (extends horizontally/vertically)
- * 
- * HARDWARE INTERFACE:
- * - SPI_DATA: Serial data transmission (bit-banged)
- * - SPI_CLK: Serial clock (bit-banged)
+ *  * HARDWARE INTERFACE:
+ * - SPI_DATA (MOSI): Serial data transmission via hardware SPI
+ * - SPI_CLK (SCK): Serial clock via hardware SPI
  * - A, B: 2-bit row selection (binary encoding)
  * - LATCH: Transfers shift register data to output latches
  * - OE: Output enable (active LOW, controls display brightness)
@@ -505,9 +454,9 @@ void vma419_scan_display_quarter(VMA419_Display* disp) {
  * 2. Use vma419_set_pixel() or vma419_write_pixel() to draw
  * 3. Continuously call vma419_scan_display_quarter() in main loop
  *    cycling through scan_cycle 0-3 for full display refresh
- *  * PERFORMANCE NOTES:
+ * * PERFORMANCE NOTES:
  * - Recommended refresh rate: 200-500 Hz (1-2.5ms per phase)
- * - Hardware SPI: ~1μs per byte (16x faster than bit-banging)
+ * - Hardware SPI: ~1μs per byte (optimized data transfer)
  * - Full scan cycle: ~250μs for single panel with hardware SPI
  * - Memory usage: 64 bytes RAM per panel + structure overhead
  * 

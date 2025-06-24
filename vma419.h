@@ -109,27 +109,16 @@ typedef struct {
     // Part of a 2-bit address system (A is the low bit)
     volatile uint8_t* a_port_ddr;       // Direction register
     volatile uint8_t* a_port_out;       // Output register  
-    uint8_t a_pin_mask;                 // Pin mask
-
-    // Row Selection Pin B: The other part of the row selection
+    uint8_t a_pin_mask;                 // Pin mask    // Row Selection Pin B: The other part of the row selection
     // Part of a 2-bit address system (B is the high bit)
     // Together, A and B can select 4 different row groups (00, 01, 10, 11)
     volatile uint8_t* b_port_ddr;       // Direction register
     volatile uint8_t* b_port_out;       // Output register
     uint8_t b_pin_mask;                 // Pin mask
 
-    // SPI Clock Pin: The timing signal for data transmission
-    // This pin pulses high and low to tell the display "here comes the next bit of data"
-    volatile uint8_t* spi_clk_port_ddr; // Direction register
-    volatile uint8_t* spi_clk_port_out; // Output register
-    uint8_t spi_clk_pin_mask;           // Pin mask
-
-    // SPI Data Pin: The actual image data
-    // This pin carries the 1s and 0s that represent which LEDs should be on or off
-    // Data is sent one bit at a time, synchronized with the clock pin
-    volatile uint8_t* spi_data_port_ddr; // Direction register
-    volatile uint8_t* spi_data_port_out; // Output register
-    uint8_t spi_data_pin_mask;          // Pin mask
+    // Note: SPI communication uses hardware SPI pins (MOSI=PB5, SCK=PB7)
+    // These are automatically configured by the hardware SPI initialization
+    // No manual pin configuration needed for SPI pins
 
     // Latch Clock Pin: The "update display now" signal
     // After sending all the data bits, pulse this pin to actually update what's shown
