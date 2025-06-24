@@ -315,15 +315,6 @@ int main(void) {
     uint8_t button_pc6_prev = (PINC & (1 << PC6)) >> PC6; // Text Up button state
     uint8_t button_pc7_prev = (PINC & (1 << PC7)) >> PC7; // Text Down button state
     uint8_t button_debounce_timer = 0; // Prevents button bouncing (false multiple presses)
-
-    // Send current button states to the computer for debugging
-    USART_SendString("Buttons: ");
-    USART_Transmit('0' + button_pc0_prev);
-    USART_Transmit('0' + button_pc1_prev);
-    USART_Transmit('0' + button_pc2_prev);
-    USART_Transmit('0' + button_pc6_prev);
-    USART_Transmit('0' + button_pc7_prev);
-    USART_SendString("\r\n");
     
     // Tell the user how to use the buttons
     USART_SendString("Controls: PC0=Speed+, PC1=Speed-, PC2=ToggleDir, PC6=Up, PC7=Down\r\n");
@@ -356,18 +347,8 @@ int main(void) {
             uint8_t button_pc6_current = (PINC & (1 << PC6)) >> PC6;
             uint8_t button_pc7_current = (PINC & (1 << PC7)) >> PC7;
 
-            // Debug: If any button state changed, tell the computer
-            if (button_pc0_current != button_pc0_prev || button_pc1_current != button_pc1_prev ||
-                button_pc2_current != button_pc2_prev ||
-                button_pc6_current != button_pc6_prev || button_pc7_current != button_pc7_prev) {
-                USART_SendString("Btn: ");
-                USART_Transmit('0' + button_pc0_current);
-                USART_Transmit('0' + button_pc1_current);
-                USART_Transmit('0' + button_pc2_current);
-                USART_Transmit('0' + button_pc6_current);
-                USART_Transmit('0' + button_pc7_current);
-                USART_SendString("\r\n");
-            }            // PC0: Speed Up button (makes text scroll faster)
+          
+            
             if (button_pc0_prev == 1 && button_pc0_current == 0) {
                 if (scroll_speed > 5) {
                     scroll_speed -= 5;  // Make it faster
@@ -448,28 +429,6 @@ int main(void) {
         }
 
         // ===============================================
-        // PERIODIC STATUS REPORTS
-        // ===============================================
-        // Every 1000 display refresh cycles (about 4 seconds), send button status to computer
-        button_status_counter++;
-        if (button_status_counter >= 1000) {
-            button_status_counter = 0;  // Reset the counter
-            
-            // Read current button states for the status report
-            uint8_t pc0_state = (PINC & (1 << PC0)) >> PC0;
-            uint8_t pc1_state = (PINC & (1 << PC1)) >> PC1;
-            uint8_t pc2_state = (PINC & (1 << PC2)) >> PC2;
-            uint8_t pc6_state = (PINC & (1 << PC6)) >> PC6;
-            uint8_t pc7_state = (PINC & (1 << PC7)) >> PC7;
-            
-            USART_SendString("Status: ");
-            USART_Transmit('0' + pc0_state);
-            USART_Transmit('0' + pc1_state);
-            USART_Transmit('0' + pc2_state);
-            USART_Transmit('0' + pc6_state);
-            USART_Transmit('0' + pc7_state);
-            USART_SendString("\r\n> ");
-        }        // ===============================================
         // UPDATE THE LED DISPLAY
         // ===============================================
         // Clear the display and draw the current text
