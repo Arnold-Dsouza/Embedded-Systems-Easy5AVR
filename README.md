@@ -33,7 +33,7 @@ This project implements a professional-grade LED matrix display controller that 
 ## 🎥 Project Video
 
 ### Demonstration Video
-![Project Demo Video](image/Video.mp4)
+https://github.com/user-attachments/assets/e241327a-3fa3-472f-962a-384655966364
 *Complete demonstration showing scrolling text, button controls, UART communication, and all features in action*
 
 > **Note**: If the video doesn't play directly in GitHub, you can download it from the `image/Video.mp4` file to view locally.
@@ -271,7 +271,7 @@ This project is open-source and available for educational use. Feel free to modi
 
 ## 👨‍💻 Author
 
-**Arnold Dsouza**, **Miłosz Markiewicz** 
+**Authors**: Arnold Dsouza & Miłosz Markiewicz  
 Embedded Systems Project  
 Date: June 2025
 
